@@ -11,6 +11,12 @@ Pokémon Champions 向けの補助デスクトップアプリです。
 - **ショートカット**: スクリーンショット `S`、録画 `R`、敵 PT 手動フルスキャン `T`
 - **設定メニュー**: キャプチャデバイス・スクショ／録画の保存先・照合閾値などを編集（`QSettings` に保存）。終了時のウィンドウサイズも保存され、次回復元されます。
 
+## 動作イメージ
+<img src="resources/screenshots/capture_20260422_202917.png" width="1280" alt="image1">
+<img src="resources/screenshots/capture_20260422_031758.png" width="1280" alt="image2">
+<img src="resources/screenshots/capture_20260422_031726.png" width="1280" alt="image3">
+<img src="resources/screenshots/capture_20260422_031645.png" width="1280" alt="image4">
+
 ## ダウンロード
 [ダウンロード](https://github.com/ktwave/pokech_supporter/releases/latest)
 
