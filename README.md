@@ -1,6 +1,6 @@
 # PokeCh Supporter
 
-Pokémon Championships 向けの補助デスクトップアプリです。
+Pokémon Champions 向けの補助デスクトップアプリです。
 キャプチャ映像から OCR・画像認識でチーム情報を読み取り、対面サポートの参照や、プロファイル別の対面統計をローカルに蓄積します。
 
 ## 主な機能
