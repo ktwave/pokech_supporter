@@ -109,5 +109,5 @@ class Config:
     OPP_FINAL_PARTY_ROIS = ()
     OPP_FINAL_SCAN_FRAMES = 10
     OPP_FINAL_SCAN_INTERVAL_MS = 100
-    # 相手選出確定後、ターン開始テンプレの検知を始めるまでの待ち秒（相手の確定アニメ用）。0 で無効。
+    # 相手選出ゲート(_ensure)通過後、初回ターン開始で戦闘トラッキングに入るまでの待ち秒。0 で無効。
     TURN_START_ARM_DELAY_SEC = 0.0

@@ -179,7 +179,9 @@ class SharedFrame:
             return self.frame.copy() if self.frame is not None else None
 
 """
-<summary>敵PTの自動スキャンと自PTのリアルタイム同期を両立させた監視スレッド</summary>
+敵PTスキャン後は _pre_battle_tick で「自選トリガー(is_waiting)」と「ターン開始」を並行監視する。
+ターン開始が先に立った場合は自選バーストを行わずに戦闘トラッキングへ移る。
+戦闘開始後は track_opponent_active のみ（バトル終了・対面監視）。
 """
 class OcrThread(QThread):
     opp_party_signal = Signal(list)
@@ -209,6 +211,8 @@ class OcrThread(QThread):
         self.is_opp_pick_confirmed = False
         self._opp_final_selection_scan_done = False
         self._opp_pick_confirmed_at = 0.0
+        # 敵PTスキャン後〜初回ターン開始まで: 自選バーストは最大1回。ターン開始が先ならバーストは行わない。
+        self._my_final_burst_ran = False
 
     def run(self):
         print("--- [OcrThread] Monitoring Started (Opponent + My Selection) ---")
@@ -245,29 +249,61 @@ class OcrThread(QThread):
                     self.is_opp_pick_confirmed = False
                     self._opp_final_selection_scan_done = False
                     self._opp_pick_confirmed_at = 0.0
+                    self._my_final_burst_ran = False
 
-                # --- 2. 自PT監視（選出完了後にバーストスキャン） ---
-                if self.is_opp_scanned and not self.is_my_selection_locked:
-                    if self.service.ocr.is_waiting(frame):
-                        print("!!! [LOCK] My Selection Confirmed !!! start final burst scan")
-                        self.perform_my_selection_final_scan()
-                        self.is_my_selection_locked = True
+                # --- 2. 敵PT後: 自選トリガーとターン開始を並行監視。ターン開始が先なら自選バーストはスキップ。---
+                if self.is_opp_scanned:
+                    if not self.is_opp_active_tracking:
+                        self._pre_battle_tick(frame)
                     else:
-                        if self._tick % 10 == 0:
-                            print("[MY-DEBUG] waiting for final selection trigger")
-
-                # --- 2c 敵の選出確定後にのみターン開始（バトル開始）監視へ進む ---
-                if self.is_opp_scanned and self.is_my_selection_locked and not self.is_opp_pick_confirmed:
-                    self._ensure_opponent_pick_gate()
-
-                # --- 3. ターン開始・バトル終了・対面選出の追跡（敵選出確定後のみ）---
-                if self.is_opp_scanned and self.is_opp_pick_confirmed:
-                    self.track_opponent_active(frame)
+                        self.track_opponent_active(frame)
 
                 # 監視スパン：リアルタイム性を維持しつつ負荷を抑える
                 self.msleep(300)
             else:
                 self.msleep(100)
+
+    def _enter_battle_tracking(self):
+        """初回ターン開始を検知したらバトル中扱いにし、以降は自選バーストを行わない。"""
+        if self.is_opp_active_tracking:
+            return
+        self.is_opp_active_tracking = True
+        self._my_final_burst_ran = True
+        self.last_opp_capture_time = 0.0
+        print("[BATTLE] turn start → 戦闘中トラッキング開始（自選バーストは以降スキップ）")
+        self.battle_started_signal.emit()
+
+    def _pre_battle_tick(self, frame):
+        """敵PT確定後〜初回ターン開始前。ターン開始を自選トリガーより優先する。"""
+        now = time.time()
+        is_ts, ts_score = self.service.ocr.is_turn_start_with_score(frame)
+
+        if not self._my_final_burst_ran and self._tick % 10 == 0:
+            print(
+                f"[PRE-BATTLE] waiting_trigger={self.service.ocr.is_waiting(frame)} "
+                f"turn_start={is_ts} score={ts_score:.3f}"
+            )
+
+        if is_ts:
+            self._ensure_opponent_pick_gate()
+            arm_delay = float(getattr(Config, "TURN_START_ARM_DELAY_SEC", 0.0) or 0.0)
+            if (
+                arm_delay > 0.0
+                and self._opp_pick_confirmed_at > 0.0
+                and (now - self._opp_pick_confirmed_at) < arm_delay
+            ):
+                return
+            self._enter_battle_tracking()
+            return
+
+        if self._my_final_burst_ran:
+            return
+        if self.service.ocr.is_waiting(frame):
+            print("!!! [LOCK] My Selection Confirmed !!! start final burst scan")
+            self.perform_my_selection_final_scan()
+            self._my_final_burst_ran = True
+            self.is_my_selection_locked = True
+            self._ensure_opponent_pick_gate()
 
     def perform_my_selection_final_scan(self):
         """<summary>選出完了後に0.1秒間隔で複数フレームを取得し、多数決で自選出を確定する</summary>"""
@@ -328,7 +364,6 @@ class OcrThread(QThread):
         if not rois:
             self.is_opp_pick_confirmed = True
             self._opp_pick_confirmed_at = time.time()
-            print("[OPP-FINAL] ROI 未設定のため、相手選出は確定済み扱いでターン開始監視を許可します。")
             return
         if self._opp_final_selection_scan_done:
             self.is_opp_pick_confirmed = True
@@ -428,6 +463,8 @@ class OcrThread(QThread):
             self.is_opp_pick_confirmed = False
             self._opp_final_selection_scan_done = False
             self._opp_pick_confirmed_at = 0.0
+            self._my_final_burst_ran = False
+            self.is_my_selection_locked = False
 
     def reset_match_state_for_new_battle(self):
         self.opp_party = []
@@ -439,20 +476,21 @@ class OcrThread(QThread):
         self.is_opp_pick_confirmed = False
         self._opp_final_selection_scan_done = False
         self._opp_pick_confirmed_at = 0.0
+        self._my_final_burst_ran = False
+        self.is_my_selection_locked = False
         self.my_selection_signal.emit(["Empty", "Empty", "Empty"])
         self.opp_selection_signal.emit(["Empty", "Empty", "Empty"])
 
     def track_opponent_active(self, frame):
         now = time.time()
-        is_turn_start, score = self.service.ocr.is_turn_start_with_score(frame)
         is_battle_end, end_score = False, -1.0
         if self.is_opp_active_tracking:
             is_battle_end, end_score = self.service.ocr.is_battle_end_with_score(frame)
         if now - self.last_turn_debug_time >= 1.0:
-            if not self.is_opp_active_tracking:
-                print(f"[TURN-START] score={score:.3f} th={Config.TURN_START_MATCH_THRESHOLD:.2f} match={is_turn_start}")
-            else:
-                print(f"[BATTLE-END] score={end_score:.3f} th={Config.BATTLE_END_MATCH_THRESHOLD:.2f} match={is_battle_end}")
+            print(
+                f"[BATTLE] battle_end match={is_battle_end} "
+                f"score={end_score:.3f} th={Config.BATTLE_END_MATCH_THRESHOLD:.2f}"
+            )
             self.last_turn_debug_time = now
 
         if self.is_opp_active_tracking and is_battle_end:
@@ -464,28 +502,13 @@ class OcrThread(QThread):
             self.is_opp_pick_confirmed = False
             self._opp_final_selection_scan_done = False
             self._opp_pick_confirmed_at = 0.0
+            self._my_final_burst_ran = False
             print("[OPP-ACTIVE] battle end detected: stop capture loop and return to 01:30 watch")
             self.battle_stats_signal.emit(
                 list(self.opp_party_scanned), list(self.opp_selection)
             )
             self.battle_ended_signal.emit()
             return
-
-        # 戦い開始を1回だけ検知し、以後は定期キャプチャモードへ移行
-        if not self.is_opp_active_tracking:
-            arm_delay = float(getattr(Config, "TURN_START_ARM_DELAY_SEC", 0.0) or 0.0)
-            if (
-                arm_delay > 0.0
-                and self._opp_pick_confirmed_at > 0.0
-                and (now - self._opp_pick_confirmed_at) < arm_delay
-            ):
-                return
-            if not is_turn_start:
-                return
-            self.is_opp_active_tracking = True
-            self.last_opp_capture_time = 0.0
-            print("[OPP-ACTIVE] turn start detected: start 1s capture loop")
-            self.battle_started_signal.emit()
 
         if not self.opp_party:
             print("[OPP-ACTIVE] skip: opponent party is empty")
