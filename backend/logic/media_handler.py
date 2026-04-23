@@ -15,7 +15,8 @@ class MediaHandler:
     def save_screenshot(self, frame):
         """<summary>スクリーンショットを保存する</summary>"""
         if frame is None: return None
-        save_dir = os.path.join(Config.RESOURCES_DIR, "screenshots")
+        custom = getattr(Config, "SCREENSHOT_SAVE_DIR", "") or ""
+        save_dir = custom.strip() if custom.strip() else os.path.join(Config.RESOURCES_DIR, "screenshots")
         os.makedirs(save_dir, exist_ok=True)
         path = os.path.join(save_dir, f"capture_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.png")
         cv2.imwrite(path, frame)
@@ -24,7 +25,8 @@ class MediaHandler:
     def start_recording(self):
         """<summary>録画を開始する</summary>"""
         if self.is_recording: return
-        save_dir = os.path.join(Config.RESOURCES_DIR, "videos")
+        custom = getattr(Config, "RECORD_SAVE_DIR", "") or ""
+        save_dir = custom.strip() if custom.strip() else os.path.join(Config.RESOURCES_DIR, "videos")
         os.makedirs(save_dir, exist_ok=True)
         filename = os.path.join(save_dir, f"record_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4")
         

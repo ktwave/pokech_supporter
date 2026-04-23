@@ -19,6 +19,11 @@ class Config:
     WIDTH = 1280
     HEIGHT = 720
     MATCH_THRESHOLD = 0.2
+    # メニュー「設定」で変更。空文字のときは既定パス（resources 配下）を使う。
+    SCREENSHOT_SAVE_DIR = ""
+    RECORD_SAVE_DIR = ""
+    # 未実装: 将来的にバトル開始と連動した自動録画に使用
+    AUTO_RECORD_ENABLED = False
 
     # --- OCR・自動スキャン用座標 (x, y, w, h) ---
     # 1. 相手のパーティ（見せ合い6体）: 1列に縦並び

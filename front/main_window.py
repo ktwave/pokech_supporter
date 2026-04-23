@@ -10,6 +10,7 @@ import threading
 from collections import Counter
 from PySide6.QtWidgets import (
     QApplication,
+    QDialog,
     QMainWindow,
     QLabel,
     QVBoxLayout,
@@ -37,6 +38,11 @@ from backend.logic.pokemon_urls import (
     load_pokecham_battle_support_urls_by_japanese_name,
     load_yakkun_urls_by_japanese_name,
 )
+from front.app_settings import (
+    apply_app_settings,
+    read_window_size,
+    save_window_size,
+)
 from front.layout_constants import (
     LEFT_SIDEBAR_MIN_WIDTH_PX,
     OPP_PARTY_ICON_CELL_MIN_WIDTH_PX,
@@ -50,6 +56,7 @@ from front.layout_constants import (
 from front.opponent_stats_panel import OpponentStatsPanel
 from front.pokecham_fetch_thread import PokechamFetchThread
 from front.pokemon_slot import PokemonSlotWidget
+from front.settings_dialog import SettingsDialog
 from backend.db.profile_stats_store import ProfileStatsStore
 
 
@@ -612,7 +619,6 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self._media_recording = False
-        self.resize(WINDOW_DEFAULT_WIDTH_PX, WINDOW_DEFAULT_HEIGHT_PX)
         self.setAcceptDrops(True)
         self.battle_seconds_left = 20 * 60
         self.battle_timer_running = False
@@ -632,12 +638,22 @@ class MainWindow(QMainWindow):
         self._stats_battle_generation = 0
         self._profile_store = ProfileStatsStore()
         self._profile_settings = QSettings("PokeChSupporter", "PokeChSupporter")
+        apply_app_settings(self._profile_settings)
+        wh = read_window_size(self._profile_settings)
+        if wh:
+            self.resize(wh[0], wh[1])
+        else:
+            self.resize(WINDOW_DEFAULT_WIDTH_PX, WINDOW_DEFAULT_HEIGHT_PX)
         self._active_profile_id = self._resolve_active_profile_id()
         self._in_battle = False
         self._menu_profile = None
         self._sub_profile_switch = None
+        self._menu_settings = None
+        self._last_media_mode = "device"
+        self._last_video_file_path = None
         self._init_ui()
         self._init_profile_menu()
+        self._init_settings_menu()
         self._sync_window_title()
         self._wire_pokemon_url_clicks()
         self._install_media_seek_shortcuts()
@@ -829,6 +845,8 @@ class MainWindow(QMainWindow):
 
 
     def _start_threads(self, mode, path=None):
+        self._last_media_mode = mode
+        self._last_video_file_path = path
         self._stop_threads()
         self.video_thread = VideoThread(mode=mode, video_path=path, shared_frame=self.shared_frame)
         self.video_thread.change_pixmap_signal.connect(self.update_image)
@@ -863,6 +881,23 @@ class MainWindow(QMainWindow):
         self._menu_profile.addAction("新規作成…").triggered.connect(self._on_profile_new)
         self._sub_profile_switch = self._menu_profile.addMenu("切り替え")
         self._reload_profile_switch_menu()
+
+    def _init_settings_menu(self):
+        self._menu_settings = self.menuBar().addMenu("設定")
+        self._menu_settings.addAction("環境設定…").triggered.connect(self._open_settings_dialog)
+
+    def _open_settings_dialog(self):
+        prev_dev = str(Config.VIDEO_DEVICE)
+        dlg = SettingsDialog(self._profile_settings, self)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        apply_app_settings(self._profile_settings)
+        dev_changed = prev_dev.strip() != str(Config.VIDEO_DEVICE).strip()
+        if dev_changed:
+            if self._last_media_mode == "file" and self._last_video_file_path:
+                self._start_threads("file", self._last_video_file_path)
+            else:
+                self._start_threads("device")
 
     def _reload_profile_switch_menu(self):
         if self._sub_profile_switch is None:
@@ -1146,9 +1181,13 @@ class MainWindow(QMainWindow):
         urls = event.mimeData().urls()
         if urls:
             path = urls[0].toLocalFile()
-            if os.path.exists(path): self._start_threads("file", path)
+            if os.path.exists(path):
+                self._start_threads("file", path)
+
     def closeEvent(self, event):
-        self._stop_threads(); event.accept()
+        save_window_size(self._profile_settings, self.width(), self.height())
+        self._stop_threads()
+        event.accept()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

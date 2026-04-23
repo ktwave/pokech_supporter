@@ -23,10 +23,6 @@ class CaptureService:
         self.analyzer = TeamAnalyzer()
         self.media = MediaHandler()
 
-        self.ocr = OcrProcessor()
-        self.analyzer = TeamAnalyzer()
-        self.media = MediaHandler()
-
     def start_capture(self):
         """<summary>映像入力を開始する</summary>"""
         if self.mode == "device":
